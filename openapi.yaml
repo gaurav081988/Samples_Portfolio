@@ -1,0 +1,408 @@
+openapi: 3.0.3
+info:
+  title: Vaultline Key Service API
+  version: 2.4.0
+  description: |
+    The Vaultline Key Service API lets you generate data keys, decrypt wrapped
+    data keys and manage the lifecycle of master keys. Use it to implement
+    envelope encryption in your applications.
+
+    Master keys never leave the service. Your application encrypts data locally
+    with a data key, and Vaultline protects that data key by wrapping it under a
+    master key.
+
+    *Vaultline is a fictional product created for portfolio purposes.*
+  contact:
+    name: Vaultline Developer Support
+    url: https://developers.vaultline.example.com/support
+servers:
+  - url: https://api.vaultline.example.com/v2
+    description: Production
+security:
+  - bearerAuth: []
+tags:
+  - name: Data keys
+    description: Generate and unwrap data keys for envelope encryption.
+  - name: Master keys
+    description: Inspect and manage the lifecycle of master keys.
+paths:
+  /keys/{key_id}:
+    get:
+      tags: [Master keys]
+      operationId: getMasterKey
+      summary: Get a master key
+      description: |
+        Returns the metadata for a master key, including its current version and
+        status. The response never includes key material.
+
+        **Required permission:** `keys:read`
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: The master key metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterKey'
+              example:
+                key_id: payments-prod
+                key_version: 3
+                status: active
+                created_at: '2026-01-14T02:31:07Z'
+                request_id: req_1c77e0
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /keys/{key_id}/data-keys:
+    post:
+      tags: [Data keys]
+      operationId: generateDataKey
+      summary: Generate a data key
+      description: |
+        Generates a new data key and returns it in two forms: plaintext and
+        wrapped (encrypted under the master key). Use the plaintext key to
+        encrypt your data locally, then discard it. Store the wrapped key with
+        your ciphertext.
+
+        Each call returns a different data key. Use one data key for each object.
+
+        **Required permission:** `keys:generate`
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateDataKeyRequest'
+            example:
+              key_spec: AES_256
+      responses:
+        '201':
+          description: The data key was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataKey'
+              example:
+                key_id: payments-prod
+                key_version: 3
+                plaintext_key: q3Jt...base64...
+                wrapped_key: AQIDAHh...base64...
+                request_id: req_8f2a91
+        '400': {$ref: '#/components/responses/InvalidKeySpec'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/KeyDisabled'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /keys/{key_id}/decrypt:
+    post:
+      tags: [Data keys]
+      operationId: decryptDataKey
+      summary: Decrypt a wrapped key
+      description: |
+        Unwraps a data key. Send the wrapped key from the generate response, and
+        the service returns the plaintext data key. Vaultline selects the master
+        key version that wrapped the data key, so decryption keeps working after
+        you rotate the master key.
+
+        **Required permission:** `keys:decrypt`
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecryptRequest'
+            example:
+              wrapped_key: AQIDAHh...base64...
+      responses:
+        '200':
+          description: The plaintext data key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecryptResponse'
+              example:
+                key_id: payments-prod
+                key_version: 3
+                plaintext_key: q3Jt...base64...
+                request_id: req_5d09b3
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/KeyDisabled'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /keys/{key_id}/rotate:
+    post:
+      tags: [Master keys]
+      operationId: rotateMasterKey
+      summary: Rotate a master key
+      description: |
+        Creates a new key version. New data keys use the new version. Earlier
+        versions stay available for decryption, so existing data keeps working.
+
+        **Required permission:** `keys:rotate`
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: The new key version is active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterKey'
+              example:
+                key_id: payments-prod
+                key_version: 4
+                status: active
+                created_at: '2026-01-14T02:31:07Z'
+                request_id: req_a42f6d
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/KeyDisabled'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /keys/{key_id}/disable:
+    post:
+      tags: [Master keys]
+      operationId: disableMasterKey
+      summary: Disable a master key
+      description: |
+        Disables a master key. While a key is disabled, requests to generate or
+        decrypt data keys fail with `409 key_disabled`. Disable a key immediately
+        if you suspect it has been exposed.
+
+        **Required permission:** `keys:manage`
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: The master key is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterKey'
+              example:
+                key_id: payments-prod
+                key_version: 4
+                status: disabled
+                created_at: '2026-01-14T02:31:07Z'
+                request_id: req_71be08
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /keys/{key_id}/enable:
+    post:
+      tags: [Master keys]
+      operationId: enableMasterKey
+      summary: Enable a master key
+      description: |
+        Re-enables a disabled master key so that generate and decrypt requests
+        succeed again.
+
+        **Required permission:** `keys:manage`
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: The master key is active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MasterKey'
+              example:
+                key_id: payments-prod
+                key_version: 4
+                status: active
+                created_at: '2026-01-14T02:31:07Z'
+                request_id: req_93c1d7
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Send your API token in the `Authorization` header as `Bearer <token>`.
+        Store the token in an environment variable or a secrets manager. Never
+        commit it to version control.
+  parameters:
+    KeyId:
+      name: key_id
+      in: path
+      required: true
+      description: The name of the master key, for example `payments-prod`.
+      schema:
+        type: string
+        example: payments-prod
+  schemas:
+    GenerateDataKeyRequest:
+      type: object
+      required: [key_spec]
+      properties:
+        key_spec:
+          type: string
+          enum: [AES_128, AES_256]
+          description: |
+            The type of data key to generate. Use `AES_256` unless you need
+            lower latency, in which case `AES_128` is available.
+    DataKey:
+      type: object
+      properties:
+        key_id:
+          type: string
+          description: The name of the master key that wrapped the data key.
+        key_version:
+          type: integer
+          description: |
+            The master key version used to wrap the data key. Record this value
+            so you can trace which version protects your data.
+        plaintext_key:
+          type: string
+          format: byte
+          description: |
+            The Base64-encoded plaintext data key. Use it to encrypt your data
+            locally, then discard it. Never store or log it.
+        wrapped_key:
+          type: string
+          format: byte
+          description: |
+            The Base64-encoded data key, encrypted under the master key. Store it
+            with your ciphertext.
+        request_id:
+          $ref: '#/components/schemas/RequestId'
+    DecryptRequest:
+      type: object
+      required: [wrapped_key]
+      properties:
+        wrapped_key:
+          type: string
+          format: byte
+          description: The Base64-encoded wrapped key from the generate response.
+    DecryptResponse:
+      type: object
+      properties:
+        key_id:
+          type: string
+        key_version:
+          type: integer
+          description: The master key version that wrapped the data key.
+        plaintext_key:
+          type: string
+          format: byte
+          description: |
+            The Base64-encoded plaintext data key. Never store or log it.
+        request_id:
+          $ref: '#/components/schemas/RequestId'
+    MasterKey:
+      type: object
+      properties:
+        key_id:
+          type: string
+        key_version:
+          type: integer
+          description: The current (latest) key version.
+        status:
+          type: string
+          enum: [active, disabled]
+        created_at:
+          type: string
+          format: date-time
+          description: When the master key was first created.
+        request_id:
+          $ref: '#/components/schemas/RequestId'
+    RequestId:
+      type: string
+      description: |
+        A unique ID for the request. Include it when you contact support.
+    Error:
+      type: object
+      required: [error, message, request_id]
+      properties:
+        error:
+          type: string
+          description: A stable, machine-readable error code.
+        message:
+          type: string
+          description: A human-readable explanation of what went wrong.
+        request_id:
+          $ref: '#/components/schemas/RequestId'
+  responses:
+    InvalidKeySpec:
+      description: The `key_spec` value is not supported. Use `AES_128` or `AES_256`.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example:
+            error: invalid_key_spec
+            message: "key_spec must be AES_128 or AES_256."
+            request_id: req_2e91c4
+    Unauthorized:
+      description: The token is missing, expired or malformed. Request a new token.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example:
+            error: invalid_token
+            message: "The API token is missing, expired or malformed."
+            request_id: req_6a30d8
+    Forbidden:
+      description: The token lacks the permission this operation requires.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example:
+            error: permission_denied
+            message: "The token does not have the keys:decrypt permission."
+            request_id: req_0b47f2
+    NotFound:
+      description: The master key does not exist. Check the `key_id` spelling.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example:
+            error: key_not_found
+            message: "No master key named payments-prd exists."
+            request_id: req_c8d153
+    KeyDisabled:
+      description: The master key is disabled. Enable the key, then retry.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example:
+            error: key_disabled
+            message: "The master key payments-prod is disabled."
+            request_id: req_e5a7b9
+    RateLimited:
+      description: Too many requests. Retry with exponential backoff.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example:
+            error: rate_limited
+            message: "Too many requests. Retry after a short delay."
+            request_id: req_3f6c21
+    ServiceUnavailable:
+      description: A temporary service issue. Retry after a short delay.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example:
+            error: service_unavailable
+            message: "The service is temporarily unavailable."
+            request_id: req_9d2e60
